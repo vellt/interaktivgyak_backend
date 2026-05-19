@@ -86,7 +86,6 @@ router.post('/answer', async (req, res) => {
     return res.status(400).json({ error: 'Hiányzó adatok' });
 
   try {
-    // Session ellenőrzés
     const [sessions] = await db.query(
       'SELECT * FROM exam_sessions WHERE id = ? AND finished_at IS NULL',
       [sessionId]
@@ -94,23 +93,22 @@ router.post('/answer', async (req, res) => {
     if (!sessions.length)
       return res.status(400).json({ error: 'Érvénytelen vagy már lezárt session' });
 
-    // Időtúllépés ellenőrzés
-    const session = sessions[0];
-    const elapsed = (Date.now() - new Date(session.started_at).getTime()) / 1000;
+    // Időtúllépés — MySQL számolja, nem Node.js
+    const [timeCheck] = await db.query(
+      'SELECT TIMESTAMPDIFF(SECOND, started_at, NOW()) as elapsed FROM exam_sessions WHERE id = ?',
+      [sessionId]
+    );
+    const elapsed = timeCheck[0].elapsed;
     if (elapsed > EXAM_DURATION)
       return res.status(400).json({ error: 'Az idő lejárt', expired: true });
 
-    // Kérdés típus lekérése
     const [qRows] = await db.query('SELECT type FROM questions WHERE id = ?', [questionId]);
     if (!qRows.length) return res.status(404).json({ error: 'Kérdés nem található' });
 
-    // Meglévő válasz törlése (felülírás)
     await db.query(
       'DELETE FROM session_answers WHERE session_id = ? AND question_id = ?',
       [sessionId, questionId]
     );
-
-    // Mentés (helyes-e majd a lezáráskor ellenőrizzük)
     await db.query(
       'INSERT INTO session_answers (session_id, question_id, answer_data) VALUES (?, ?, ?)',
       [sessionId, questionId, JSON.stringify(answer)]
@@ -122,7 +120,6 @@ router.post('/answer', async (req, res) => {
     res.status(500).json({ error: 'Szerverhiba' });
   }
 });
-
 // Vizsga befejezése és kiértékelés
 router.post('/finish', async (req, res) => {
   const { sessionId, expired } = req.body;
